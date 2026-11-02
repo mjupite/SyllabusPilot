@@ -21,6 +21,7 @@ import {
   BarChart3,
   ListChecks,
   MapPin,
+  Search,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -133,6 +134,7 @@ export default function App() {
   const [activeStage, setActiveStage] = useState<ActiveStage>('plan');
   const [inputMode, setInputMode] = useState<InputMode>('text');
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>('calendar');
+  const [taskSearch, setTaskSearch] = useState('');
   const [distributionView, setDistributionView] = useState<'chart' | 'list'>('chart');
 
   // Stage 1: Syllabus Input State
@@ -646,6 +648,28 @@ export default function App() {
   const toggleTaskCompleted = (taskId: string) => {
     setCompletedTaskIds((prev) => ({ ...prev, [taskId]: !prev[taskId] }));
   };
+
+  const visibleWeeks = useMemo(() => {
+    const query = taskSearch.trim().toLocaleLowerCase();
+    if (!query) return studyPlan.weeks;
+
+    return studyPlan.weeks.flatMap((week) => {
+      const weekText = [
+        `week ${week.weekNumber}`,
+        `week ${String(week.weekNumber).padStart(2, '0')}`,
+        week.dateRange,
+        week.theme,
+        ...(week.milestonesDue || []),
+      ].join(' ').toLocaleLowerCase();
+      if (weekText.includes(query)) return [week];
+
+      const tasks = week.tasks.filter((task) =>
+        [task.title, task.relatedItemTitle, task.suggestedDay, task.notes]
+          .join(' ').toLocaleLowerCase().includes(query)
+      );
+      return tasks.length ? [{ ...week, tasks }] : [];
+    });
+  }, [studyPlan.weeks, taskSearch]);
 
   const monthLabel = new Date(currentMonth.year, currentMonth.month, 1).toLocaleDateString(
     'en-US',
@@ -1285,8 +1309,21 @@ export default function App() {
                 <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100 font-display">
                   Study Calendar
                 </h1>
-
               </div>
+
+              {planViewMode === 'weekly' && (
+                <div className="relative flex-1 min-w-[220px] max-w-md mx-auto">
+                  <Search aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                  <input
+                    type="search"
+                    aria-label="Search weekly tasks"
+                    placeholder="Search tasks or weeks…"
+                    value={taskSearch}
+                    onChange={(event) => setTaskSearch(event.target.value)}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 py-2.5 pl-9 pr-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              )}
 
               <div className="flex flex-wrap items-center gap-2.5">
                 {/* Switch between Visual Calendar and Week-by-Week List */}
@@ -1595,7 +1632,21 @@ export default function App() {
                  VIEW B: CLEAN WEEK-BY-WEEK CHECKLIST
                  =============================================================== */
               <div className="divide-y divide-slate-200 dark:divide-slate-800 border-y border-slate-200 dark:border-slate-800">
-                {studyPlan.weeks.map((week) => (
+                {visibleWeeks.length === 0 && (
+                  <div role="status" className="py-12 text-center space-y-3">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
+                      No tasks or weeks match “{taskSearch.trim()}”.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setTaskSearch('')}
+                      className="text-sm font-semibold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                    >
+                      Clear search
+                    </button>
+                  </div>
+                )}
+                {visibleWeeks.map((week) => (
                   <div
                     key={week.weekNumber}
                     className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-5 md:gap-8 py-6"
