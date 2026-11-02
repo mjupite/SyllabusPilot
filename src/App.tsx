@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react';
 import {
   FileText,
   Upload,
@@ -64,8 +64,72 @@ const CATEGORIES: GradedItemCategory[] = [
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
+const THEME_COOKIE = 'syllabuspilot-theme';
+const TASK_COOKIE_PREFIX = 'syllabuspilot-task-';
+
+function readPreferenceCookies(): Record<string, string> {
+  try {
+    return Object.fromEntries(
+      document.cookie.split(';').filter((entry) => entry.trim()).map((entry) => {
+        const separator = entry.indexOf('=');
+        return [entry.slice(0, separator).trim(), entry.slice(separator + 1)];
+      })
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writePreferenceCookie(name: string, value: string, remove = false) {
+  try {
+    const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=${value}; Path=/; Max-Age=${remove ? 0 : 31536000}; SameSite=Lax${secure}`;
+  } catch {
+    // Keep controls usable when the browser blocks cookies.
+  }
+}
+
+function useSavedTheme() {
+  const [darkMode, setDarkMode] = useState(
+    () => readPreferenceCookies()[THEME_COOKIE] === 'dark'
+  );
+  useEffect(() => {
+    writePreferenceCookie(THEME_COOKIE, darkMode ? 'dark' : 'light');
+  }, [darkMode]);
+  return [darkMode, setDarkMode] as const;
+}
+
+function useSavedTaskCompletion() {
+  const [completedTaskIds, setCompletedTaskIds] = useState<Record<string, boolean>>(() => {
+    const completed: Record<string, boolean> = {};
+    for (const [name, value] of Object.entries(readPreferenceCookies())) {
+      if (!name.startsWith(TASK_COOKIE_PREFIX) || value !== '1') continue;
+      try {
+        const id = decodeURIComponent(name.slice(TASK_COOKIE_PREFIX.length));
+        if (id) Object.defineProperty(completed, id, { value: true, enumerable: true, writable: true, configurable: true });
+      } catch {
+        // Ignore malformed cookies without interrupting the page.
+      }
+    }
+    return completed;
+  });
+  const saved = useRef(completedTaskIds);
+
+  useEffect(() => {
+    for (const id of new Set([...Object.keys(saved.current), ...Object.keys(completedTaskIds)])) {
+      const done = completedTaskIds[id] === true;
+      if (done === (saved.current[id] === true)) continue;
+      // Separate cookies avoid a single growing completion map exceeding 4 KB.
+      writePreferenceCookie(`${TASK_COOKIE_PREFIX}${encodeURIComponent(id)}`, '1', !done);
+    }
+    saved.current = completedTaskIds;
+  }, [completedTaskIds]);
+
+  return [completedTaskIds, setCompletedTaskIds] as const;
+}
+
 export default function App() {
-  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const [darkMode, setDarkMode] = useSavedTheme();
   const [activeStage, setActiveStage] = useState<ActiveStage>('plan');
   const [inputMode, setInputMode] = useState<InputMode>('text');
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>('calendar');
@@ -99,7 +163,7 @@ export default function App() {
     month: 9, // 0-indexed: 9 = October 2026 (Midterm & Kernel M1 month)
   });
   const [selectedDateStr, setSelectedDateStr] = useState<string>('2026-10-16');
-  const [completedTaskIds, setCompletedTaskIds] = useState<Record<string, boolean>>({});
+  const [completedTaskIds, setCompletedTaskIds] = useSavedTaskCompletion();
 
   // Loading & Feedback States
   const [isExtracting, setIsExtracting] = useState<boolean>(false);
@@ -134,14 +198,12 @@ export default function App() {
       });
   }, []);
 
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode);
+  }, [darkMode]);
+
   const toggleDarkMode = () => {
-    const next = !darkMode;
-    setDarkMode(next);
-    if (next) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    setDarkMode((previous) => !previous);
   };
 
   const showToast = (msg: string) => {
